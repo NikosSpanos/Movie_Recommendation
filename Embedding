@@ -1,0 +1,54 @@
+# Cast Embeddings
+
+import fasttext
+from tqdm import tqdm
+
+# Note: Reset_index() is mandatory
+five_thousands = five_thousands.reset_index()
+
+def combine_actors(row):
+    return row['actor_1_name'] + "," + row['actor_2_name'] + "," + row['actor_3_name']
+
+five_thousands["combined_actors"] = five_thousands.apply(combine_actors, axis=1)
+
+with open('actors_embeddings.txt', 'w', encoding="utf-8") as f:
+    for text in five_thousands["combined_actors"].tolist():
+        f.write(text + '\n')
+
+# Skipgram model (updated)
+model = fasttext.train_unsupervised("actors_embeddings.txt", model='skipgram', lr=0.05, dim=500, ws=5, epoch=25)
+model.save_model("model_file_cast.bin")
+
+average_vector_list_cast = []
+for i in tqdm(range(len(five_thousands["combined_actors"]))):
+    actors = five_thousands["combined_actors"].str.split(',')[i]
+    average = np.vstack([model[actor].mean() for actor in actors])
+    average_vector_list_cast.append(average)
+
+five_thousands.loc[:, ('average_cast_vectors')] = average_vector_list_cast
+
+# --------------------------------------------------------------------------------------------------
+
+# Plot Summary Embeddings
+
+# Note: Reset_index() is mandatory
+# five_thousands = five_thousands.reset_index()
+
+import fasttext
+from tqdm import tqdm
+
+with open('plot_summary_embeddings.txt', 'w', encoding="utf-8") as f:
+    for text in five_thousands["plot_summary"].tolist():
+        f.write(text + '\n')
+
+# Skipgram model (updated)
+model = fasttext.train_unsupervised("plot_summary_embeddings.txt", model='skipgram', lr=0.05, dim=500, ws=5, epoch=25)
+model.save_model("model_file_plot.bin")
+
+average_vector_list_plot = []
+for i in tqdm(range(len(five_thousands["plot_summary"]))):
+    plots = five_thousands["plot_summary"][i]
+    average = np.vstack([model[plot].mean() for plot in plots])
+    average_vector_list_plot.append(average)
+
+five_thousands.loc[:, ('average_plot_vectors')] = average_vector_list_plot
