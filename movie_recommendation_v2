@@ -1,0 +1,140 @@
+
+# Code snipset that wiil provide the response
+
+import pandas as pd
+from bs4 import BeautifulSoup
+import requests
+import numpy as np
+import nltk
+from nltk import word_tokenize
+from nltk.stem import PorterStemmer
+from nltk.corpus import stopwords
+import re
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.feature_extraction.text import CountVectorizer
+from sklearn.metrics.pairwise import cosine_similarity
+
+
+def stop_and_stem(uncleaned_list):
+    ps = PorterStemmer()
+    stop = set(stopwords.words('english'))
+    stopped_list = [i for i in uncleaned_list if i not in stop]
+    stemmed_words = [ps.stem(word) for word in stopped_list]
+    return stemmed_words
+
+def search_words(row, list_of_words):
+    ps = PorterStemmer()
+    row = [ps.stem(x) for x in row]
+    counter = 0
+    for word in list_of_words:
+        if word in row:
+            counter = counter + 1
+    return counter
+
+def find_correct_genre(user_input, genre_list):
+    scores_sim=[]
+    vectorizer = TfidfVectorizer()
+
+    for item in genre_list:
+        ed = nltk.edit_distance(user_input, item)
+        scores_sim.append(ed)
+    correct_genre_index = scores_sim.index(min(scores_sim))
+    correct_genre = genre_list[correct_genre_index].lower()
+    return correct_genre
+
+def recommend_movie(input_one,input_two,input_movie):
+    # load data
+    five_thousands_old = pd.read_pickle('C:\\Users\\dq186sy\\Desktop\\Big Data Content Analytics\\Movie Recommendation System\\five_thousands_model.pkl')
+
+    five_thousands = five_thousands_old.drop_duplicates(subset=['movie_imdb_link'], keep='first')
+
+    # Create the movie_genre list with the unique types of genre 
+
+    movie_genre_first = five_thousands.genre_0.unique().tolist()
+    movie_genre_second = five_thousands.genre_1.unique().tolist()
+    movie_genre_third = five_thousands.genre_2.unique().tolist()
+    movie_genre_fourth = five_thousands.genre_3.unique().tolist()
+    movie_genre_fifth = five_thousands.genre_4.unique().tolist()
+    movie_genre_sixth = five_thousands.genre_5.unique().tolist()
+    movie_genre_seventh = five_thousands.genre_6.unique().tolist()
+    movie_genre_eight = five_thousands.genre_7.unique().tolist()
+
+    movie_genre_list = np.asarray(movie_genre_first + movie_genre_second + movie_genre_third + movie_genre_fourth + movie_genre_fifth + movie_genre_sixth + movie_genre_seventh + movie_genre_eight)
+    list(movie_genre_list.flatten())
+    movie_genre_list = list(set(movie_genre_list))
+
+    movie_genre_list = [x.lower() for x in movie_genre_list]
+
+    # Get inputs from the user and clean them
+
+    # input_one = input("Give me a movie genre (i.e romance, action, adventure): ")
+    input_one = find_correct_genre(input_one.lower(), movie_genre_list)
+    input_movie = input_movie.lower().replace('-', '').replace('The', '')
+    input_two = input_two.lower().split(' ')
+
+    # input_two = input("Think of a(n) {} movie that you like and write a reason that you like this movie: ".format(input_one)).lower().split(' ')
+    inputs_list = stop_and_stem(input_two)
+
+    # Calculate the score functions ("IMDB score" and "Included number of words")
+
+    # Process User's Input 
+
+    # Locate the rpws were the genre == input_one
+    locked_frame = five_thousands.loc[(five_thousands.genre_0.str.lower() == input_one) | (five_thousands.genre_1.str.lower() == input_one) | (five_thousands.genre_2.str.lower() == input_one) | (five_thousands.genre_3.str.lower() == input_one) | (five_thousands.genre_4.str.lower() == input_one) | (five_thousands.genre_5.str.lower() == input_one) | (five_thousands.genre_6.str.lower() == input_one) | (five_thousands.genre_7.str.lower() == input_one)]
+
+    # From those movies located, now lock the plot_summary of the movie == input_movie
+    movie_plot = locked_frame['plot_summary'].loc[(locked_frame.movie_title.str.lower() == input_movie)]
+
+    if len(movie_plot) == 0:
+        plot_user_input_list = inputs_list
+
+    else:
+        movie_plot_new = locked_frame['plot_summary'].loc[(locked_frame.movie_title.str.lower().str.replace('-', '') == input_movie)].apply(lambda x: list(set(re.split(' |,|\n', x.strip().lower())))).values[0]
+        cleaned_movie_plot = stop_and_stem(movie_plot_new)
+        plot_user_input_list = inputs_list + cleaned_movie_plot
+
+    locked_frame['unique_words'] = locked_frame.combined_features.apply(lambda x: list(set(re.split(' |,|\n', x.strip().lower()))))
+
+    # Process the similarity of combined features
+
+    cv = CountVectorizer()
+    count_matrix = cv.fit_transform(locked_frame['combined_features'])
+    cosine_sim = cosine_similarity(count_matrix)
+
+    locked_frame['std_similarity'] = [np.std(x) for x in cosine_sim]
+    locked_frame['median_similarity'] = [np.median(x) for x in cosine_sim]
+
+    locked_frame['number_of_words'] = locked_frame.unique_words.apply(search_words, args=(plot_user_input_list,))
+
+    # Calculate the movie score
+    primary_genre = list((locked_frame.genre_0.str.lower() == input_one)*0.1)
+
+    locked_frame['movie_score'] = 0.05*locked_frame.updated_rating.astype(float) + 0.75*locked_frame.number_of_words + 0.05*locked_frame.std_similarity + 0.05*locked_frame.median_similarity
+    locked_frame['movie_score'] = locked_frame['movie_score'] + primary_genre
+
+    # Give to the user the proper movie recommendation
+
+    # First alternative output
+
+    # three_rows = locked_frame.nlargest(3, 'movie_score')
+    # three_rows.rename(columns={'movie_title':'Movie Title', 'updated_rating':'IMDB Rate', 'movie_imdb_link':"Movie's Link"}, inplace=True)
+    # recommendations = three_rows[['Movie Title', 'IMDB Rate', "Movie's Link"]].to_string(index=False)
+
+    # Second alternative output
+
+    # first_row = locked_frame.nlargest(1, 'movie_score')
+    # first_row.rename(columns={'movie_title':'Movie Title', 'updated_rating':'IMDB Rate', 'movie_imdb_link':"Movie's Link"}, inplace=True)
+    # recommendations = first_row[['Movie Title', 'IMDB Rate', "Movie's Link"]].to_string(index=False)
+
+    # Third alternative output
+
+    four_rows = locked_frame.nlargest(4, 'movie_score')
+    four_rows.rename(columns={'movie_title':'Movie Title', 'updated_rating':'IMDB Rate', 'movie_imdb_link':"Movie's Link"}, inplace=True)
+
+    if len(movie_plot) == 0:
+        recommendations_list = four_rows.loc[:, ['Movie Title', 'IMDB Rate', "Movie's Link"]].values.tolist()[0:3]
+
+    else:
+        recommendations_list = four_rows.loc[:, ['Movie Title', 'IMDB Rate', "Movie's Link"]].values.tolist()[1:]
+
+    return recommendations_list
